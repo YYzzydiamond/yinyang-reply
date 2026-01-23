@@ -1,0 +1,10 @@
+/* 推特阴阳回复助手 - 样式 */
+
+.yinyang-reply-btn {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.yinyang-reply-btn:active {
+  transform: scale(0.95) !important;
+}

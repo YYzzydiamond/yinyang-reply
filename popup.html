@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>阴阳回复助手设置</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 320px;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #fff;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      font-size: 18px;
+      margin-bottom: 5px;
+    }
+
+    .header .emoji {
+      font-size: 32px;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      color: #ccc;
+    }
+
+    input[type="password"],
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #0f0f1a;
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      border-color: #4a9eff;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #4a9eff 0%, #6366f1 100%);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(74, 158, 255, 0.3);
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      text-align: center;
+      display: none;
+    }
+
+    .status.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+    }
+
+    .status.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+    }
+
+    .tips {
+      margin-top: 20px;
+      padding-top: 15px;
+      border-top: 1px solid #333;
+    }
+
+    .tips h3 {
+      font-size: 13px;
+      margin-bottom: 10px;
+      color: #aaa;
+    }
+
+    .tips ul {
+      font-size: 11px;
+      color: #777;
+      padding-left: 16px;
+    }
+
+    .tips li {
+      margin-bottom: 5px;
+    }
+
+    .show-key {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .input-wrapper {
+      position: relative;
+    }
+
+    .mode-selector {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .mode-option {
+      cursor: pointer;
+    }
+
+    .mode-option input {
+      display: none;
+    }
+
+    .mode-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 2px solid #333;
+      border-radius: 8px;
+      background: #0f0f1a;
+      transition: all 0.2s;
+    }
+
+    .mode-option input:checked + .mode-card {
+      border-color: #4a9eff;
+      background: rgba(74, 158, 255, 0.1);
+    }
+
+    .mode-card:hover {
+      border-color: #555;
+    }
+
+    .mode-emoji {
+      font-size: 24px;
+    }
+
+    .mode-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .mode-desc {
+      font-size: 11px;
+      color: #888;
+      margin-left: auto;
+    }
+
+    .mode-option input:checked + .mode-card.gentle {
+      border-color: #22c55e;
+      background: rgba(34, 197, 94, 0.1);
+    }
+
+    .mode-option input:checked + .mode-card.normal {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.1);
+    }
+
+    .mode-option input:checked + .mode-card.nuclear {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="emoji">😏</div>
+    <h1>阴阳回复助手</h1>
+    <p>贴吧老哥风格，专治各种不服</p>
+  </div>
+
+  <div class="form-group">
+    <label for="apiKey">DeepSeek API Key（可留空使用公共API）</label>
+    <div class="input-wrapper">
+      <input type="password" id="apiKey" placeholder="留空使用公共API" value="">
+      <button class="show-key" id="toggleKey">显示</button>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label>攻击模式</label>
+    <div class="mode-selector">
+      <label class="mode-option">
+        <input type="radio" name="mode" value="gentle">
+        <span class="mode-card gentle">
+          <span class="mode-emoji">😇</span>
+          <span class="mode-name">善良模式</span>
+          <span class="mode-desc">点到为止</span>
+        </span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="mode" value="normal" checked>
+        <span class="mode-card normal">
+          <span class="mode-emoji">😏</span>
+          <span class="mode-name">你先惹的我模式</span>
+          <span class="mode-desc">阴阳怪气</span>
+        </span>
+      </label>
+      <label class="mode-option">
+        <input type="radio" name="mode" value="nuclear">
+        <span class="mode-card nuclear">
+          <span class="mode-emoji">💀</span>
+          <span class="mode-name">都别活了模式</span>
+          <span class="mode-desc">火力全开</span>
+        </span>
+      </label>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="saveBtn">保存设置</button>
+
+  <div class="status" id="status"></div>
+
+  <div class="tips">
+    <h3>使用说明</h3>
+    <ul>
+      <li>每条推文旁会出现「阴阳回复」按钮</li>
+      <li>点击即可一键生成并发送回复</li>
+      <li>切换模式后刷新推特页面生效</li>
+    </ul>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
