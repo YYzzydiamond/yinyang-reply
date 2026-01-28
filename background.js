@@ -3,6 +3,73 @@
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEFAULT_API_KEY = 'sk-c88c7f0df6294d85ba3908778c06f00f';
 
+// Keep-alive 机制，防止 Service Worker 休眠
+const KEEP_ALIVE_INTERVAL = 20000; // 20秒
+setInterval(() => {
+  chrome.storage.local.get(['keepAlive'], () => {
+    // 简单的存储访问可以保持 Service Worker 活跃
+  });
+}, KEEP_ALIVE_INTERVAL);
+
+// 历史记录配置
+const HISTORY_MAX_SIZE = 10; // 记录最近10次使用的开头词
+
+// 获取历史使用的开头词
+async function getUsedPhrases() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['usedPhrases'], (result) => {
+      resolve(result.usedPhrases || []);
+    });
+  });
+}
+
+// 保存使用过的开头词
+async function saveUsedPhrase(reply) {
+  // 移除开头的emoji，提取纯文字开头
+  const cleanReply = reply.replace(/^[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}\s]+/gu, '');
+  const textToCheck = cleanReply || reply; // 如果全是emoji则用原文
+  
+  // 提取回复的开头词（前2-6个字）
+  const phrases = [];
+  
+  // 提取不同长度的开头
+  if (textToCheck.length >= 2) phrases.push(textToCheck.substring(0, 2));
+  if (textToCheck.length >= 3) phrases.push(textToCheck.substring(0, 3));
+  if (textToCheck.length >= 4) phrases.push(textToCheck.substring(0, 4));
+  if (textToCheck.length >= 6) phrases.push(textToCheck.substring(0, 6));
+  
+  // 提取常见的阴阳开头词
+  const commonStarters = [
+    '典中典', '就这', '急了', '乐了', '绑不住', '蚌埠住', '栓Q', '无语子',
+    '好好好', '行行行', '6', '666', '确实', '嗯嗯', '对对对', '是是是',
+    '不会吧', '真的假的', '合理吗', '逆天', '离谱', '笑死', '服了',
+    '建议', '不是', '家人们', '格局', '大受震撼', '刷新认知'
+  ];
+  
+  for (const starter of commonStarters) {
+    if (textToCheck.startsWith(starter)) {
+      phrases.push(starter);
+      break;
+    }
+  }
+  
+  const usedPhrases = await getUsedPhrases();
+  
+  // 添加新的开头词，去重
+  for (const phrase of phrases) {
+    if (!usedPhrases.includes(phrase)) {
+      usedPhrases.unshift(phrase);
+    }
+  }
+  
+  // 保持列表大小
+  while (usedPhrases.length > HISTORY_MAX_SIZE) {
+    usedPhrases.pop();
+  }
+  
+  await chrome.storage.local.set({ usedPhrases });
+}
+
 // 三种攻击模式的 Prompt
 const MODE_PROMPTS = {
   // 善良模式 - 温和反讽
@@ -38,6 +105,7 @@ const MODE_PROMPTS = {
 3. 喜欢用"建议"、"可能"、"或许"等词汇包装毒舌
 4. 语气要接地气，不带脏字但杀伤力极强
 5. 回复要简短有力，一般1-3句话
+6. 适当加入1-2个emoji表情增加阴阳效果，如：😅🤔🙃😇🤡💀😰🥲🤣😂🫠🤷‍♂️👍🙏😊😏
 
 【阴阳语句库 - 每次随机选用不同句式，灵活组合】：
 
@@ -122,6 +190,7 @@ const MODE_PROMPTS = {
 4. 语气极度阴阳，让人看了血压飙升
 5. 回复要狠毒精准，1-3句话直接送走
 6. 可以质疑对方智商、能力、审美等一切
+7. 加入1-2个毒舌emoji增强嘲讽效果，如：🤡💀😅🙃🤔😇🥱🫠😰🤣👍🙏🤷‍♂️
 
 【毒舌语句库 - 火力全开，随机选用】：
 
@@ -194,6 +263,20 @@ const MODE_PROMPTS = {
 4. 可以根据推文内容即兴发挥，创造新的毒舌句式`
 };
 
+// 随机 emoji 池
+const EMOJI_POOL = {
+  gentle: ['😄', '😊', '🤗', '👍', '✨', '💪', '🙌', '😎', '🤝', '💯', '🎉', '😁', '🌟', '👏'],
+  normal: ['😅', '🤔', '🙃', '😇', '🤡', '💀', '😰', '🥲', '🤣', '😂', '🫠', '🤷‍♂️', '👍', '🙏', '😊', '😏', '🥴', '😮‍💨', '🫣', '🤭'],
+  nuclear: ['🤡', '💀', '😅', '🙃', '🤔', '😇', '🥱', '🫠', '😰', '🤣', '👍', '🙏', '🤷‍♂️', '🫵', '💩', '🤮', '🥶', '😵', '🤯', '👎']
+};
+
+// 随机选择 emoji
+function getRandomEmojis(mode, count = 3) {
+  const pool = EMOJI_POOL[mode] || EMOJI_POOL.normal;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
 // 随机风格提示，增加回复多样性
 const RANDOM_STYLE_HINTS = [
   '这次用反问句式',
@@ -224,10 +307,20 @@ async function callDeepSeekAPI(apiKey, tweetContent, mode = 'normal') {
   const styleHint = getRandomStyleHint();
   const randomSeed = Math.floor(Math.random() * 10000);
   
+  // 获取历史使用过的开头词
+  const usedPhrases = await getUsedPhrases();
+  const avoidHint = usedPhrases.length > 0 
+    ? `\n\n【重要】禁止使用以下开头词（最近已用过）：${usedPhrases.join('、')}\n必须用完全不同的开头方式！`
+    : '';
+  
+  // 获取本次随机推荐的 emoji（只选1个）
+  const randomEmoji = getRandomEmojis(mode, 1)[0];
+  const emojiHint = `\n本次使用的emoji：${randomEmoji}`;
+  
   const userPrompts = {
-    gentle: `请用幽默友善的方式回复这条推文：\n\n"${tweetContent}"\n\n风格提示：${styleHint}\n随机种子：${randomSeed}\n\n直接给出回复内容，不要解释，不要重复之前的回复风格。`,
-    normal: `请用阴阳怪气的方式回复这条推文：\n\n"${tweetContent}"\n\n风格提示：${styleHint}\n随机种子：${randomSeed}\n\n直接给出回复内容，不要解释，每次要用不同的句式和角度，展现你的创意。`,
-    nuclear: `请用最阴阳最毒舌的方式回复这条推文，火力拉满：\n\n"${tweetContent}"\n\n风格提示：${styleHint}\n随机种子：${randomSeed}\n\n直接给出回复内容，不要解释，要有创意，每次都要不一样。`
+    gentle: `请用幽默友善的方式回复这条推文：\n\n"${tweetContent}"\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，不要重复之前的回复风格。`,
+    normal: `请用阴阳怪气的方式回复这条推文：\n\n"${tweetContent}"\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，每次要用不同的句式和角度，展现你的创意。`,
+    nuclear: `请用最阴阳最毒舌的方式回复这条推文，火力拉满：\n\n"${tweetContent}"\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，要有创意，每次都要不一样。`
   };
 
   const response = await fetch(DEEPSEEK_API_URL, {
@@ -273,6 +366,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       try {
         const reply = await callDeepSeekAPI(apiKey, request.tweetContent, mode);
+        // 保存使用过的开头词，避免下次重复
+        await saveUsedPhrase(reply);
         sendResponse({
           success: true,
           reply: reply

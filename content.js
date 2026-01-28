@@ -24,22 +24,43 @@
   async function generateReply(tweetContent) {
     console.log('[阴阳助手] 开始生成回复，推文内容:', tweetContent);
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({
-        action: 'generateReply',
-        tweetContent: tweetContent
-      }, (response) => {
-        console.log('[阴阳助手] 收到响应:', response);
-        if (chrome.runtime.lastError) {
-          console.error('[阴阳助手] 运行时错误:', chrome.runtime.lastError);
-          reject(new Error(chrome.runtime.lastError.message || '扩展通信失败，请刷新页面'));
-          return;
-        }
-        if (response && response.success) {
-          resolve(response.reply);
-        } else {
-          reject(new Error(response?.error || '生成失败'));
-        }
-      });
+      // 检查 chrome.runtime 是否可用（Service Worker 可能已休眠）
+      if (!chrome.runtime || !chrome.runtime.sendMessage) {
+        reject(new Error('扩展已断开连接，请刷新页面后重试'));
+        return;
+      }
+      
+      try {
+        chrome.runtime.sendMessage({
+          action: 'generateReply',
+          tweetContent: tweetContent
+        }, (response) => {
+          console.log('[阴阳助手] 收到响应:', response);
+          
+          // 检查运行时错误
+          if (chrome.runtime.lastError) {
+            console.error('[阴阳助手] 运行时错误:', chrome.runtime.lastError);
+            reject(new Error('扩展通信失败，请刷新页面后重试'));
+            return;
+          }
+          
+          // 检查响应是否存在
+          if (!response) {
+            reject(new Error('未收到响应，请刷新页面后重试'));
+            return;
+          }
+          
+          // 检查响应状态
+          if (response.success) {
+            resolve(response.reply);
+          } else {
+            reject(new Error(response.error || '生成失败，请重试'));
+          }
+        });
+      } catch (e) {
+        console.error('[阴阳助手] 发送消息异常:', e);
+        reject(new Error('扩展通信异常，请刷新页面后重试'));
+      }
     });
   }
 
@@ -80,6 +101,17 @@
     });
   }
 
+  // 检查内容是否已填入
+  function isContentFilled(element, text) {
+    const content = element.textContent.trim();
+    if (!content) return false;
+    // 检查前几个字符是否匹配（排除emoji干扰）
+    const cleanText = text.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]/gu, '');
+    const cleanContent = content.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F600}-\u{1F64F}\u{1F680}-\u{1F6FF}]/gu, '');
+    const checkStr = cleanText.substring(0, Math.min(5, cleanText.length));
+    return cleanContent.includes(checkStr);
+  }
+
   // 填入回复内容
   async function fillReplyContent(replyBox, text) {
     console.log('[阴阳助手] 开始填入内容:', text);
@@ -96,46 +128,54 @@
     
     // 聚焦
     editableElement.focus();
+    await new Promise(r => setTimeout(r, 100));
     
-    // 使用剪贴板粘贴方式（对 Draft.js 最可靠）
-    try {
-      // 保存原剪贴板内容
-      const originalClipboard = await navigator.clipboard.readText().catch(() => '');
-      
-      // 写入要粘贴的内容
-      await navigator.clipboard.writeText(text);
-      console.log('[阴阳助手] 已写入剪贴板');
-      
-      // 模拟粘贴
-      const pasteEvent = new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: new DataTransfer()
-      });
-      pasteEvent.clipboardData.setData('text/plain', text);
-      editableElement.dispatchEvent(pasteEvent);
-      
-      // 也尝试 execCommand paste
-      document.execCommand('paste');
-      
-      // 如果还是没内容，用 insertText
-      await new Promise(r => setTimeout(r, 100));
-      if (!editableElement.textContent.trim()) {
-        console.log('[阴阳助手] 粘贴失败，尝试 insertText');
-        document.execCommand('insertText', false, text);
+    // 方法1: execCommand insertText（最简单直接）
+    console.log('[阴阳助手] 尝试方法1: execCommand');
+    document.execCommand('selectAll', false, null);
+    document.execCommand('insertText', false, text);
+    await new Promise(r => setTimeout(r, 200));
+    
+    // 检查是否成功
+    if (isContentFilled(editableElement, text)) {
+      console.log('[阴阳助手] 方法1成功');
+    } else {
+      // 方法2: 使用 beforeinput 事件
+      console.log('[阴阳助手] 方法1失败，尝试方法2: beforeinput');
+      try {
+        const dataTransfer = new DataTransfer();
+        dataTransfer.setData('text/plain', text);
+        
+        const pasteEvent = new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertFromPaste',
+          data: text,
+          dataTransfer: dataTransfer
+        });
+        editableElement.dispatchEvent(pasteEvent);
+        await new Promise(r => setTimeout(r, 200));
+      } catch (e) {
+        console.log('[阴阳助手] beforeinput 方式失败:', e);
       }
-      
-      // 恢复原剪贴板
-      if (originalClipboard) {
-        await navigator.clipboard.writeText(originalClipboard).catch(() => {});
-      }
-    } catch (e) {
-      console.log('[阴阳助手] 剪贴板方式失败，使用备用方案:', e);
-      // 备用方案：模拟输入
-      document.execCommand('insertText', false, text);
     }
     
-    // 触发事件
+    // 再次检查
+    if (isContentFilled(editableElement, text)) {
+      console.log('[阴阳助手] 内容已填入');
+    } else {
+      // 方法3: 直接设置 innerHTML（最后手段）
+      console.log('[阴阳助手] 尝试方法3: 直接设置内容');
+      const span = editableElement.querySelector('span[data-text="true"]');
+      if (span) {
+        span.textContent = text;
+      } else {
+        // 创建 Draft.js 需要的结构
+        editableElement.innerHTML = `<div data-block="true"><div data-offset-key="0"><span data-offset-key="0"><span data-text="true">${text}</span></span></div></div>`;
+      }
+    }
+    
+    // 触发 input 事件确保状态更新
     editableElement.dispatchEvent(new InputEvent('input', { 
       bubbles: true, 
       composed: true,
@@ -143,26 +183,32 @@
       data: text
     }));
     
-    // 等待一下让 Draft.js 处理
-    await new Promise(r => setTimeout(r, 200));
+    // 等待 Draft.js 处理
+    await new Promise(r => setTimeout(r, 300));
     
     console.log('[阴阳助手] 填入完成，当前内容:', editableElement.textContent);
   }
 
-  // 点击发送按钮
-  function clickSendButton() {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const sendBtn = document.querySelector('[data-testid="tweetButton"]') ||
-                       document.querySelector('[data-testid="tweetButtonInline"]');
-        if (sendBtn && !sendBtn.disabled) {
-          sendBtn.click();
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      }, 300);
-    });
+  // 点击发送按钮（带重试）
+  async function clickSendButton() {
+    // 多次尝试点击发送按钮
+    for (let i = 0; i < 5; i++) {
+      await new Promise(r => setTimeout(r, 300));
+      
+      const sendBtn = document.querySelector('[data-testid="tweetButton"]') ||
+                     document.querySelector('[data-testid="tweetButtonInline"]');
+      
+      console.log(`[阴阳助手] 尝试发送 ${i + 1}/5，按钮状态:`, sendBtn ? (sendBtn.disabled ? '禁用' : '可用') : '未找到');
+      
+      if (sendBtn && !sendBtn.disabled) {
+        sendBtn.click();
+        console.log('[阴阳助手] 已点击发送按钮');
+        return true;
+      }
+    }
+    
+    console.log('[阴阳助手] 发送按钮未能启用，内容已填入，请手动发送');
+    return false;
   }
 
   // 处理阴阳回复按钮点击
