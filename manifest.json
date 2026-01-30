@@ -10,7 +10,9 @@
   "host_permissions": [
     "https://twitter.com/*",
     "https://x.com/*",
-    "https://api.deepseek.com/*"
+    "https://api.deepseek.com/*",
+    "https://max.openai365.top/*",
+    "https://*/*"
   ],
   "action": {
     "default_popup": "popup.html"

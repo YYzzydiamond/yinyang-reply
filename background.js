@@ -1,7 +1,9 @@
 // 推特阴阳回复助手 - Background Service Worker
 
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
+const DEFAULT_DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions';
+const DEFAULT_GEMINI_URL = 'https://max.openai365.top/v1/chat/completions';
 const DEFAULT_API_KEY = 'sk-c88c7f0df6294d85ba3908778c06f00f';
+const DEFAULT_GEMINI_KEY = 'sk-ZxWieaCqGToNdEZFo8KVIFTIrmziu32epxbVZonxKiWNK1TH';
 
 // Keep-alive 机制，防止 Service Worker 休眠
 const KEEP_ALIVE_INTERVAL = 20000; // 20秒
@@ -301,8 +303,80 @@ function getRandomStyleHint() {
   return RANDOM_STYLE_HINTS[Math.floor(Math.random() * RANDOM_STYLE_HINTS.length)];
 }
 
-// 调用 DeepSeek API
-async function callDeepSeekAPI(apiKey, tweetContent, mode = 'normal') {
+// 调用 Gemini API（OpenAI 兼容格式，支持图片）
+async function callGeminiAPI(apiKey, apiUrl, tweetText, imageUrls = [], mode = 'normal') {
+  const systemPrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.normal;
+  const styleHint = getRandomStyleHint();
+  const randomSeed = Math.floor(Math.random() * 10000);
+  
+  const usedPhrases = await getUsedPhrases();
+  const avoidHint = usedPhrases.length > 0 
+    ? `\n\n【重要】禁止使用以下开头词（最近已用过）：${usedPhrases.join('、')}\n必须用完全不同的开头方式！`
+    : '';
+  
+  const randomEmoji = getRandomEmojis(mode, 1)[0];
+  
+  // 构建提示词
+  let contentDesc = tweetText ? `推文文字："${tweetText}"` : '这是一条纯图片推文';
+  contentDesc += `\n推文包含${imageUrls.length}张图片，请仔细观察图片内容后进行回复。`;
+  
+  const userPromptText = `请用阴阳怪气的方式回复这条推文：
+
+${contentDesc}
+
+风格提示：${styleHint}
+本次使用的emoji：${randomEmoji}
+随机种子：${randomSeed}${avoidHint}
+
+直接给出回复内容，不要解释，每次要用不同的句式和角度。`;
+
+  // 构建 OpenAI 兼容格式的消息内容
+  const userContent = [
+    { type: 'text', text: userPromptText }
+  ];
+  
+  // 添加图片 URL（OpenAI 格式）
+  for (const imgUrl of imageUrls.slice(0, 3)) {
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: imgUrl }
+    });
+  }
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: 'gemini-3-pro-preview',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
+      ],
+      temperature: mode === 'nuclear' ? 1.2 : 1.0,
+      max_tokens: 200,
+      top_p: 0.95
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Gemini API 请求失败: ${response.status} - ${error}`);
+  }
+
+  const data = await response.json();
+  
+  if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+    throw new Error('Gemini 返回数据格式错误');
+  }
+  
+  return data.choices[0].message.content.trim();
+}
+
+// 调用 DeepSeek API（纯文字）
+async function callDeepSeekAPI(apiKey, tweetText, imageUrls = [], mode = 'normal') {
   const systemPrompt = MODE_PROMPTS[mode] || MODE_PROMPTS.normal;
   const styleHint = getRandomStyleHint();
   const randomSeed = Math.floor(Math.random() * 10000);
@@ -317,39 +391,41 @@ async function callDeepSeekAPI(apiKey, tweetContent, mode = 'normal') {
   const randomEmoji = getRandomEmojis(mode, 1)[0];
   const emojiHint = `\n本次使用的emoji：${randomEmoji}`;
   
-  const userPrompts = {
-    gentle: `请用幽默友善的方式回复这条推文：\n\n"${tweetContent}"\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，不要重复之前的回复风格。`,
-    normal: `请用阴阳怪气的方式回复这条推文：\n\n"${tweetContent}"\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，每次要用不同的句式和角度，展现你的创意。`,
-    nuclear: `请用最阴阳最毒舌的方式回复这条推文，火力拉满：\n\n"${tweetContent}"\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，要有创意，每次都要不一样。`
+  // 构建内容描述
+  const contentDesc = tweetText ? `推文文字："${tweetText}"` : '这是一条推文';
+  
+  const userPromptTemplates = {
+    gentle: `请用幽默友善的方式回复这条推文：\n\n${contentDesc}\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，不要重复之前的回复风格。`,
+    normal: `请用阴阳怪气的方式回复这条推文：\n\n${contentDesc}\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，每次要用不同的句式和角度，展现你的创意。`,
+    nuclear: `请用最阴阳最毒舌的方式回复这条推文，火力拉满：\n\n${contentDesc}\n\n风格提示：${styleHint}${emojiHint}\n随机种子：${randomSeed}${avoidHint}\n\n直接给出回复内容，不要解释，要有创意，每次都要不一样。`
   };
 
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: systemPrompt
-        },
-        {
-          role: 'user',
-          content: userPrompts[mode] || userPrompts.normal
-        }
-      ],
-      temperature: mode === 'nuclear' ? 1.2 : 1.0,
-      max_tokens: 200,
-      top_p: 0.95
-    })
-  });
+  let response;
+  try {
+    response = await fetch(DEFAULT_DEEPSEEK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPromptTemplates[mode] || userPromptTemplates.normal }
+        ],
+        temperature: mode === 'nuclear' ? 1.2 : 1.0,
+        max_tokens: 200,
+        top_p: 0.95
+      })
+    });
+  } catch (fetchError) {
+    throw new Error(`网络请求失败: ${fetchError.message}`);
+  }
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API 请求失败: ${response.status} - ${error}`);
+    const errorText = await response.text();
+    throw new Error(`API 请求失败: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
@@ -360,12 +436,28 @@ async function callDeepSeekAPI(apiKey, tweetContent, mode = 'normal') {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'generateReply') {
     // 从 storage 获取 API Key 和模式
-    chrome.storage.sync.get(['deepseekApiKey', 'attackMode'], async (result) => {
-      const apiKey = result.deepseekApiKey || DEFAULT_API_KEY;
+    chrome.storage.sync.get(['deepseekApiKey', 'geminiApiKey', 'geminiEndpoint', 'attackMode'], async (result) => {
+      const deepseekKey = result.deepseekApiKey || DEFAULT_API_KEY;
+      const geminiKey = result.geminiApiKey || DEFAULT_GEMINI_KEY;
+      const geminiUrl = result.geminiEndpoint || DEFAULT_GEMINI_URL;
       const mode = result.attackMode || 'normal';
+      const imageUrls = request.imageUrls || [];
 
       try {
-        const reply = await callDeepSeekAPI(apiKey, request.tweetContent, mode);
+        let reply;
+        const hasText = request.tweetText && request.tweetText.trim();
+        const hasImages = imageUrls.length > 0;
+        
+        // 只有图片无文字，且有 Gemini Key 时用 Gemini Vision
+        if (!hasText && hasImages && geminiKey) {
+          console.log('[阴阳助手] 纯图片推文，使用 Gemini Vision');
+          reply = await callGeminiAPI(geminiKey, geminiUrl, request.tweetText, imageUrls, mode);
+        } else {
+          // 有文字时用 DeepSeek（不传图片，DeepSeek 不支持）
+          console.log('[阴阳助手] 使用 DeepSeek');
+          reply = await callDeepSeekAPI(deepseekKey, request.tweetText, [], mode);
+        }
+        
         // 保存使用过的开头词，避免下次重复
         await saveUsedPhrase(reply);
         sendResponse({
@@ -373,7 +465,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           reply: reply
         });
       } catch (error) {
-        console.error('DeepSeek API 调用失败:', error);
+        console.error('API 调用失败:', error);
         sendResponse({
           success: false,
           error: error.message

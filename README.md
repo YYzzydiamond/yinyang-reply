@@ -13,10 +13,14 @@
 ## 配置 API Key
 
 1. 点击浏览器工具栏的插件图标
-2. 输入你的 DeepSeek API Key
-3. 点击保存
+2. 配置以下选项：
+   - **DeepSeek API Key**：用于文字推文回复（可留空使用默认）
+   - **Gemini API Key**：用于纯图片推文识别（可留空使用默认）
+   - **Gemini API 端点**：自定义 Gemini API 地址（可留空使用默认）
+3. 选择攻击模式
+4. 点击保存
 
-> API Key 获取地址: https://platform.deepseek.com
+> DeepSeek API Key 获取地址: https://platform.deepseek.com
 
 ## 使用方法
 
@@ -43,6 +47,22 @@
 - 建议适度使用，文明上网 😄
 
 ## 更新日志
+
+### v1.3.0 (2026-01-30)
+- 🖼️ **图片识别功能**：纯图片推文现在可以正确识别内容并生成针对性回复！
+  - 使用 Gemini Vision API 分析图片内容
+  - 支持多图推文（最多3张）
+  - 支持视频封面、GIF、引用推文图片
+- 🔧 **双 API 架构**：
+  - 纯图片推文 → Gemini Vision（识别图片内容）
+  - 有文字推文 → DeepSeek（处理文字）
+- ⚙️ **可配置 API 端点**：
+  - Gemini API Key 和端点都可以自定义配置
+  - 支持第三方 OpenAI 兼容格式的代理
+- 🐛 **Bug 修复**：
+  - 修复图片 URL 重复问题
+  - 修复 DeepSeek 不支持图片导致的错误
+  - 添加更完善的错误处理
 
 ### v1.2.0 (2026-01-28)
 - 😀 **新增表情回复**：回复自动带emoji表情，让阴阳更有灵魂！

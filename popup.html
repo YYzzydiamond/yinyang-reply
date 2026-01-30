@@ -221,10 +221,26 @@
   </div>
 
   <div class="form-group">
-    <label for="apiKey">DeepSeek API Key（可留空使用公共API）</label>
+    <label for="apiKey">DeepSeek API Key（纯文字推文）</label>
     <div class="input-wrapper">
       <input type="password" id="apiKey" placeholder="留空使用公共API" value="">
       <button class="show-key" id="toggleKey">显示</button>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label for="geminiKey">Gemini API Key（图片推文识别）</label>
+    <div class="input-wrapper">
+      <input type="password" id="geminiKey" placeholder="留空使用默认API" value="">
+      <button class="show-key" id="toggleGeminiKey">显示</button>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label for="geminiEndpoint">Gemini API 端点</label>
+    <input type="text" id="geminiEndpoint" placeholder="留空使用默认端点" value="">
+    <div style="font-size: 10px; color: #666; margin-top: 4px;">
+      默认: https://max.openai365.top/v1/chat/completions
     </div>
   </div>
 

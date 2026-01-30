@@ -6,18 +6,78 @@
   const BUTTON_CLASS = 'yinyang-reply-btn';
   let isGenerating = false;
 
-  // 获取推文内容
+  // 获取推文内容（返回对象，包含文字和图片URL）
   function getTweetContent(tweetElement) {
+    const result = {
+      text: null,
+      imageUrls: []
+    };
+    
+    // 获取文字内容
     const tweetText = tweetElement.querySelector('[data-testid="tweetText"]');
     if (tweetText && tweetText.innerText.trim()) {
-      return tweetText.innerText.trim();
+      result.text = tweetText.innerText.trim();
     }
-    // 如果没有文字，尝试获取图片alt或返回默认提示
-    const img = tweetElement.querySelector('img[alt]');
-    if (img && img.alt && !img.alt.includes('头像')) {
-      return `[图片内容: ${img.alt}]`;
+    
+    // 获取图片 URL
+    const tweetPhotos = tweetElement.querySelectorAll('[data-testid="tweetPhoto"] img');
+    const seenUrls = new Set();
+    tweetPhotos.forEach(img => {
+      if (img.src && !img.src.includes('profile_images') && !img.src.includes('emoji')) {
+        // 获取原图 URL（去掉尺寸参数，使用较大尺寸）
+        let imgUrl = img.src;
+        // Twitter 图片 URL 格式: https://pbs.twimg.com/media/xxx?format=jpg&name=small
+        // 改为 name=medium 获取更清晰的图
+        if (imgUrl.includes('name=')) {
+          imgUrl = imgUrl.replace(/name=\w+/, 'name=medium');
+        }
+        // 去重（基于基础URL，不含参数）
+        const baseUrl = imgUrl.split('?')[0];
+        if (!seenUrls.has(baseUrl)) {
+          seenUrls.add(baseUrl);
+          result.imageUrls.push(imgUrl);
+        }
+      }
+    });
+    
+    // 检查是否有视频封面
+    const videoPoster = tweetElement.querySelector('[data-testid="videoPlayer"] video');
+    if (videoPoster && videoPoster.poster) {
+      result.imageUrls.push(videoPoster.poster);
+      if (!result.text) {
+        result.text = '[视频推文]';
+      }
     }
-    return null;
+    
+    // 检查是否有 GIF
+    const gifImg = tweetElement.querySelector('[data-testid="gifPlayer"] img');
+    if (gifImg && gifImg.src) {
+      result.imageUrls.push(gifImg.src);
+      if (!result.text) {
+        result.text = '[GIF推文]';
+      }
+    }
+    
+    // 检查是否有引用推文
+    const quoteTweet = tweetElement.querySelector('[data-testid="quoteTweet"]');
+    if (quoteTweet) {
+      const quoteText = quoteTweet.querySelector('[data-testid="tweetText"]');
+      if (quoteText && quoteText.innerText.trim()) {
+        result.text = (result.text ? result.text + '\n' : '') + `[引用: ${quoteText.innerText.trim()}]`;
+      }
+      // 引用推文中的图片
+      const quoteImg = quoteTweet.querySelector('img[src*="twimg.com/media"]');
+      if (quoteImg) {
+        result.imageUrls.push(quoteImg.src);
+      }
+    }
+    
+    // 如果既没有文字也没有图片，返回 null
+    if (!result.text && result.imageUrls.length === 0) {
+      return null;
+    }
+    
+    return result;
   }
 
   // 生成回复
@@ -33,7 +93,8 @@
       try {
         chrome.runtime.sendMessage({
           action: 'generateReply',
-          tweetContent: tweetContent
+          tweetText: tweetContent.text,
+          imageUrls: tweetContent.imageUrls
         }, (response) => {
           console.log('[阴阳助手] 收到响应:', response);
           
@@ -240,7 +301,7 @@
 
     const tweetContent = getTweetContent(tweetElement);
     console.log('[阴阳助手] 获取到推文内容:', tweetContent);
-    if (!tweetContent) {
+    if (!tweetContent || (!tweetContent.text && tweetContent.imageUrls.length === 0)) {
       alert('找不到推文内容');
       return;
     }
